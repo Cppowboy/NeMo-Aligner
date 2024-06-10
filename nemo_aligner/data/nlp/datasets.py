@@ -265,8 +265,8 @@ class DPOModelDataset(Dataset):
         self.reset_attention_mask = cfg.data.get("reset_attention_mask", False)
         self.eod_mask_loss = cfg.data.get("eod_mask_loss", False)
         self.eos_id = tokenizer.eos_id
-        self.default_chosen_reward = cfg.data.get("default_chosen_reward", 1.)
-        self.default_rejected_reward = cfg.data.get("default_rejected_reward", 0.)
+        self.default_chosen_reward = cfg.data.get("default_chosen_reward", 1.0)
+        self.default_rejected_reward = cfg.data.get("default_rejected_reward", 0.0)
 
         # Checks
         assert np.min(documents) >= 0
@@ -309,9 +309,11 @@ class DPOModelDataset(Dataset):
 
         max_curr_seq_len = max(chosen_len, reject_len)
         if max_curr_seq_len > self.seq_length:
-            logging.warning(f"WARNING: Tokenized text exceeds max seq length ({max_curr_seq_len} vs {self.seq_length})."
-                            + f"The example will be ignored.")
-            
+            logging.warning(
+                f"WARNING: Tokenized text exceeds max seq length ({max_curr_seq_len} vs {self.seq_length})."
+                + f"The example will be ignored."
+            )
+
         chosen_tokens = torch.nn.functional.pad(
             torch.LongTensor(chosen), (0, max_curr_seq_len - chosen_len), mode="constant", value=self.eos_id
         )
@@ -327,13 +329,13 @@ class DPOModelDataset(Dataset):
 
         # ignore the example whose tokenized text exceeds max seq length.
         if max_curr_seq_len > self.seq_length:
-            chosen_tokens = chosen_tokens[:self.seq_length]
-            rejected_tokens = rejected_tokens[:self.seq_length]
+            chosen_tokens = chosen_tokens[: self.seq_length]
+            rejected_tokens = rejected_tokens[: self.seq_length]
             labels_chosen_tokens = torch.ones_like(chosen_tokens) * (-100)
             labels_reject_tokens = torch.ones_like(rejected_tokens) * (-100)
             chosen_len = self.seq_length
             reject_len = self.seq_length
-        
+
         # include the ground-truth rewards of the chosen & rejected examples
         if "chosen_reward" in payload and "rejected_reward" in payload:
             chosen_reward = payload["chosen_reward"]
@@ -341,7 +343,7 @@ class DPOModelDataset(Dataset):
         else:
             chosen_reward = self.default_chosen_reward
             rejected_reward = self.default_rejected_reward
-            
+
         output = {
             "chosen": chosen_tokens,
             "rejected": rejected_tokens,
