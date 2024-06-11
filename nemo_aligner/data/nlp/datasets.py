@@ -334,14 +334,6 @@ class DPOModelDataset(Dataset):
             chosen_len = self.seq_length
             reject_len = self.seq_length
         
-        # include the ground-truth rewards of the chosen & rejected examples
-        if "chosen_reward" in payload and "rejected_reward" in payload:
-            chosen_reward = payload["chosen_reward"]
-            rejected_reward = payload["rejected_reward"]
-        else:
-            chosen_reward = self.default_chosen_reward
-            rejected_reward = self.default_rejected_reward
-            
         output = {
             "chosen": chosen_tokens,
             "rejected": rejected_tokens,
@@ -349,8 +341,8 @@ class DPOModelDataset(Dataset):
             "rejected_length": reject_len,
             "chosen_labels": labels_chosen_tokens,
             "rejected_labels": labels_reject_tokens,
-            "chosen_reward": chosen_reward,
-            "rejected_reward": rejected_reward,
+            "chosen_reward": payload.get("chosen_reward", self.default_chosen_reward),
+            "rejected_reward": payload.get("rejected_reward", self.default_rejected_reward),
         }
         return output
 

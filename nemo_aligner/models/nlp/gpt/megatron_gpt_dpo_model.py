@@ -61,10 +61,10 @@ class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInte
         self.ref_policy_kl_penalty = self.cfg.dpo.get("ref_policy_kl_penalty", 0.0)
         self.avg_log_probs = self.cfg.dpo.get("average_log_probs", False)
 
-        self.dpo_loss_weight = self.cfg.dpo.get("dpo_loss_weight", 1)
+        self.preference_loss_weight = self.cfg.dpo.get("preference_loss_weight", 1)
         self.sft_loss_weight = self.cfg.dpo.get("sft_loss_weight", 0)
         assert (
-            self.dpo_loss_weight != 0 or self.sft_loss_weight != 0
+            self.preference_loss_weight != 0 or self.sft_loss_weight != 0
         ), "sft loss weight and dpo loss weight cannot both be 0"
 
         # variants of preference losses, by default DPO.
@@ -176,19 +176,15 @@ class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInte
                     per_token_logps, ref_logprobs, labels[:, 1:], gt_rewards, average_log_probs=self.avg_log_probs
                 )
 
+                sft_loss = torch.zeros_like(preference_loss)
                 if self.sft_loss_weight != 0:
                     sft_loss = self.sft_loss_func(
                         per_token_logps, labels[:, 1:], average_log_probs=self.avg_log_probs
                     )
-                    loss = self.dpo_loss_weight * preference_loss + self.sft_loss_weight * sft_loss
-                else:
-                    sft_loss = torch.zeros_like(preference_loss)
-                    loss = self.dpo_loss_weight * preference_loss
+                loss = self.preference_loss_weight * preference_loss + self.sft_loss_weight * sft_loss
                     
-                reduced_loss = average_losses_across_data_parallel_group([loss])
-                reduced_preference_loss = average_losses_across_data_parallel_group([preference_loss])
-                reduced_sft_loss = average_losses_across_data_parallel_group([sft_loss])
-                reduced_acc = average_losses_across_data_parallel_group([acc_chosen])
+                (reduced_loss, reduced_preference_loss, reduced_sft_loss, reduced_acc) = average_losses_across_data_parallel_group(
+                    [loss, preference_loss, sft_loss, acc_chosen])
 
                 out_chosen, out_rejected = self.gather_and_split_rewards(per_token_logps, ref_logprobs, labels)
 
@@ -256,7 +252,7 @@ class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInte
 
             loss = torch.mean((self.ref_policy_kl_penalty * rewards_delta - gt_rewards_delta) ** 2, 0)
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f"preference_loss {self.preference_loss} is not implemented")
 
         with torch.no_grad():
             comp = chosen_rewards > reject_rewards
