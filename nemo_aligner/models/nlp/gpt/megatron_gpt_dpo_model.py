@@ -134,7 +134,7 @@ class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInte
 
             if batch["chosen_rewards"] is not None and batch["rejected_rewards"] is not None:
                 gt_rewards = torch.cat((batch["chosen_rewards"], batch["rejected_rewards"]), dim=0)
-                
+
             # this is necessary if MBS > 1 with the new GBS padding logic, as you may get batch dim > 1 in some configs
             # these two lines ensure your position_ids and attn_mask are always B=1
             # position_ids = batch["position_ids"][0:1]
@@ -190,8 +190,14 @@ class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInte
 
                 return (
                     loss,
-                    {"avg": reduced_loss, "avg_sft_loss": reduced_sft_loss, "avg_preference_loss": reduced_preference_loss,
-                     "acc": reduced_acc, "out_chosen": out_chosen, "out_rejected": out_rejected,},
+                    {
+                        "avg": reduced_loss,
+                        "avg_sft_loss": reduced_sft_loss,
+                        "avg_preference_loss": reduced_preference_loss,
+                        "acc": reduced_acc,
+                        "out_chosen": out_chosen,
+                        "out_rejected": out_rejected,
+                    },
                 )
 
             return output_tensor, loss_func
@@ -231,8 +237,10 @@ class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInte
             logalpha_hat_chosen = torch.nn.functional.logsigmoid(gt_rewards_delta)
             logalpha_hat_rejected = torch.nn.functional.logsigmoid(-gt_rewards_delta)
 
-            loss = (torch.exp(logalpha_hat_chosen) * (logalpha_hat_chosen - logbeta_hat_chosen)
-                    + torch.exp(logalpha_hat_rejected) * (logalpha_hat_rejected - logbeta_hat_rejected)).mean(0)
+            loss = (
+                torch.exp(logalpha_hat_chosen) * (logalpha_hat_chosen - logbeta_hat_chosen)
+                + torch.exp(logalpha_hat_rejected) * (logalpha_hat_rejected - logbeta_hat_rejected)
+            ).mean(0)
         elif self.preference_loss == "reward_fwd_dpo":
             logbeta_hat_chosen = torch.nn.functional.logsigmoid(self.ref_policy_kl_penalty * rewards_delta)
             logbeta_hat_rejected = torch.nn.functional.logsigmoid(-self.ref_policy_kl_penalty * rewards_delta)
@@ -242,8 +250,10 @@ class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInte
             logalpha_hat_chosen = torch.nn.functional.logsigmoid(gt_rewards_delta)
             logalpha_hat_rejected = torch.nn.functional.logsigmoid(-gt_rewards_delta)
 
-            loss = (torch.exp(logbeta_hat_chosen) * (logbeta_hat_chosen - logalpha_hat_chosen)
-                    + torch.exp(logbeta_hat_rejected) * (logbeta_hat_rejected - logalpha_hat_rejected)).mean(0)
+            loss = (
+                torch.exp(logbeta_hat_chosen) * (logbeta_hat_chosen - logalpha_hat_chosen)
+                + torch.exp(logbeta_hat_rejected) * (logbeta_hat_rejected - logalpha_hat_rejected)
+            ).mean(0)
         elif self.preference_loss == "ipo":
             loss = torch.mean((chosen_rewards - reject_rewards - 1.0 / (2.0 * self.ref_policy_kl_penalty)) ** 2, 0)
         elif self.preference_loss == "reward_ipo":
@@ -259,14 +269,12 @@ class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInte
             acc_chosen = comp.float().mean()
 
         return loss, acc_chosen
-    
+
     def sft_loss_func(self, pi_logprobs, labels, average_log_probs=False):
-        logprobs = self.get_reduced_masked_logps(
-            pi_logprobs, labels, average_log_probs=average_log_probs
-        )
+        logprobs = self.get_reduced_masked_logps(pi_logprobs, labels, average_log_probs=average_log_probs)
         chosen_logprobs, _ = self.split_output_tensor(logprobs)
         return -chosen_logprobs
-    
+
     def get_loss_and_metrics(self, batch, forward_only):
         seq_length = batch["chosen"].shape[1]
 
@@ -305,8 +313,9 @@ class MegatronGPTDPOModel(NLPAdapterModelMixin, MegatronGPTModel, SupervisedInte
             sft_loss_tensors_list = [loss_reduced["avg_sft_loss"] for loss_reduced in losses_reduced_per_micro_batch]
             sft_loss_tensor = torch.concat(sft_loss_tensors_list)
             sft_loss_mean = sft_loss_tensor.mean()
-            preference_loss_tensors_list = [loss_reduced["avg_preference_loss"]
-                                            for loss_reduced in losses_reduced_per_micro_batch]
+            preference_loss_tensors_list = [
+                loss_reduced["avg_preference_loss"] for loss_reduced in losses_reduced_per_micro_batch
+            ]
             preference_loss_tensor = torch.concat(preference_loss_tensors_list)
             preference_loss_mean = preference_loss_tensor.mean()
             acc_tensors_list = [loss_reduced["acc"] for loss_reduced in losses_reduced_per_micro_batch]

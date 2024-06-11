@@ -39,7 +39,7 @@ def dpo_custom_collate(batch, eos_id, reset_position_ids=False, reset_attention_
     rejected_labels = [item["rejected_labels"] for item in batch]
     chosen_rewards = torch.FloatTensor([item["chosen_reward"] for item in batch])
     rejected_rewards = torch.FloatTensor([item["rejected_reward"] for item in batch])
-    
+
     chosen_tokens = torch.nn.utils.rnn.pad_sequence(chosen_tokens, batch_first=True, padding_value=eos_id)
     rejected_tokens = torch.nn.utils.rnn.pad_sequence(rejected_tokens, batch_first=True, padding_value=eos_id)
     chosen_labels = torch.nn.utils.rnn.pad_sequence(chosen_labels, batch_first=True, padding_value=-100)
