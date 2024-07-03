@@ -534,3 +534,85 @@ class SteerLM2Dataset(GPTSFTChatDataset):
         }
 
         return processed_batch
+
+
+class SFTModelDataset(Dataset):
+    """This class works only with jsonl files. It assumes each line of the json file is a dictionary
+       with the prompt, along with the prompt and the response. This Dataset will combine the prompt with the response, and then tokenize it. It also returns the labels for each, which is the response tokens
+       with -100 for the prompt part.
+       
+       WARNING: This class will tokenize the text, but it will raise an exception on model max seq len violations!
+    """
+
+    def __init__(
+        self, cfg, tokenizer, name, data_prefix, documents, data, seq_length, seed, drop_last=True,
+    ):
+        super().__init__()
+        self.cfg = cfg
+        self.name = name
+        self.data = data
+        self.drop_last = drop_last
+        self.seq_length = seq_length
+        self.tokenizer = tokenizer
+
+        self.reset_position_ids = cfg.data.get("reset_position_ids", False)
+        self.reset_attention_mask = cfg.data.get("reset_attention_mask", False)
+        self.eod_mask_loss = cfg.data.get("eod_mask_loss", False)
+        self.eos_id = tokenizer.eos_id
+
+        # Checks
+        assert np.min(documents) >= 0
+        assert np.max(documents) < len(self.data)
+
+    def __len__(self):
+        return len(self.data)
+
+    def encode(self, text, append_eod=False):
+        if self.cfg.data.get("apply_ftfy", False):
+            import ftfy
+
+            text = ftfy.fix_text(text)
+
+        text_ids = self.tokenizer.text_to_ids(text)
+
+        if len(text_ids) > 0 and append_eod:
+            text_ids.append(self.tokenizer.eos_id)
+
+        return text_ids, len(text_ids)
+
+    def __getitem__(self, idx):
+        """Returns a pair of chosen/rejected pairs, their respective lengths, and labels.
+        """
+        payload = self.data[idx]
+        prompt, prompt_len = self.encode(payload["prompt"], append_eod=False)
+        resp, resp_len = self.encode(payload["prompt"] + payload["response"], append_eod=self.cfg.data.get("append_eod", False))
+        resp_labels = ([-100] * prompt_len) + resp[prompt_len:]
+        assert resp[0:prompt_len] == prompt, "the tokenizer for DPO has merged tokens between prompt and response"
+        max_curr_seq_len = resp_len
+        assert (
+            max_curr_seq_len <= self.seq_length
+        ), "tokenized text exceeds max seq len! truncate your data in preprocessing prior to DPO training"
+        
+        tokens = torch.nn.functional.pad(
+            torch.LongTensor(resp), (0, max_curr_seq_len - resp_len), mode="constant", value=self.eos_id
+        )
+        labels = torch.nn.functional.pad(
+            torch.LongTensor(resp_labels), (0, max_curr_seq_len - len(resp_labels)), mode="constant", value=-100
+        )
+        
+        input_ids = tokens + labels
+        context_ids = tokens
+        answer_ids = labels
+        metadata = payload
+        
+        output = {
+            'input_ids': input_ids,
+            'answer_start_idx': len(context_ids),
+            'context_ids': context_ids,
+            'context_length': len(context_ids),
+            'answer_ids': answer_ids,
+            'metadata': metadata,
+            'token_count': len(input_ids),
+        }
+        
+        return output
